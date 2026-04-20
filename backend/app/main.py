@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from sqlalchemy import update
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
 from app.database import SessionLocal
@@ -29,6 +30,21 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="House Finder API", lifespan=lifespan)
 
+
+class CorsDebugMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        origin_in = request.headers.get("origin")
+        response = await call_next(request)
+        origin_out = response.headers.get("access-control-allow-origin")
+        logger.info(
+            f"[CORS-DEBUG] {request.method} {request.url.path} "
+            f"origin_in={origin_in!r} allow_origin_out={origin_out!r}"
+        )
+        return response
+
+
+app.add_middleware(CorsDebugMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -36,6 +52,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/api/_debug/cors")
+async def debug_cors() -> dict:
+    return {
+        "frontend_url_env": settings.frontend_url,
+        "allow_origins": allowed_origins,
+    }
 
 app.include_router(health.router)
 app.include_router(searches.router)
