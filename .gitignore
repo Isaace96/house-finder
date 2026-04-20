@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Legacy CLI scraper outputs (TinyDB + CSV)
+db_*.json
+data_*.csv
+properties.log
+
+# Env files - never commit
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
+frontend/.env.local
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+
+# Claude local settings (user-specific permissions, not shared)
+.claude/settings.local.json

@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Property Review — {{ bucket | capitalize }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+  <style>
+    .card { transition: opacity 0.3s, transform 0.3s; }
+    .card.htmx-swapping { opacity: 0; transform: scale(0.95); }
+    .card:focus { outline: 3px solid #2563eb; outline-offset: 4px; }
+    address { font-style: normal; white-space: pre-line; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+
+<header class="bg-white border-b sticky top-0 z-10">
+  <div class="max-w-6xl mx-auto px-6 py-4 flex items-center gap-6">
+    <h1 class="text-xl font-bold">House finder</h1>
+    <nav class="flex gap-1">
+      {% for b in buckets %}
+        <a href="{{ url_for('review', bucket=b) }}"
+           class="px-3 py-1.5 rounded-full text-sm font-medium
+                  {% if b == bucket %}bg-slate-900 text-white{% else %}text-slate-600 hover:bg-slate-100{% endif %}">
+          {{ b | capitalize }}
+          <span class="ml-1 text-xs opacity-75">{{ counts[b] }}</span>
+        </a>
+      {% endfor %}
+    </nav>
+    <div class="ml-auto text-xs text-slate-500">
+      <kbd class="px-1.5 py-0.5 bg-slate-200 rounded">j</kbd>/<kbd class="px-1.5 py-0.5 bg-slate-200 rounded">k</kbd> nav ·
+      <kbd class="px-1.5 py-0.5 bg-slate-200 rounded">o</kbd> open ·
+      <kbd class="px-1.5 py-0.5 bg-slate-200 rounded">r</kbd> reject ·
+      <kbd class="px-1.5 py-0.5 bg-slate-200 rounded">s</kbd> shortlist ·
+      <kbd class="px-1.5 py-0.5 bg-slate-200 rounded">u</kbd> undo
+    </div>
+  </div>
+</header>
+
+<!-- Modal -->
+<div id="modal" class="hidden fixed inset-0 z-50" aria-hidden="true">
+  <div class="absolute inset-0 bg-black/60" onclick="closeModal()"></div>
+  <div class="relative mx-auto my-6 max-w-5xl max-h-[92vh] bg-white rounded-xl shadow-2xl flex flex-col">
+    <header class="sticky top-0 z-10 bg-white border-b px-6 py-3 flex items-center gap-3 rounded-t-xl">
+      <div class="flex-1 min-w-0">
+        <div class="flex items-baseline gap-3 flex-wrap">
+          <span id="modal-price" class="text-xl font-bold"></span>
+          <span id="modal-sqm" class="text-sm text-slate-500"></span>
+          <span id="modal-ppsqm" class="inline-block px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-xs font-medium"></span>
+          <span id="modal-beds" class="text-sm text-slate-500"></span>
+        </div>
+        <div id="modal-address" class="text-sm text-slate-700 truncate"></div>
+      </div>
+      <a id="modal-open-rightmove" target="_blank" rel="noopener"
+         class="px-3 py-2 text-sm text-blue-700 hover:bg-blue-50 rounded-lg">
+        Rightmove ↗
+      </a>
+      <button id="modal-reject" type="button"
+              class="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 text-sm font-medium rounded-lg">
+        Reject
+      </button>
+      <button id="modal-shortlist" type="button"
+              class="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 text-sm font-medium rounded-lg">
+        Shortlist
+      </button>
+      <button id="modal-undo" type="button"
+              class="hidden px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg">
+        Undo
+      </button>
+      <button type="button" onclick="closeModal()" aria-label="Close"
+              class="ml-1 w-9 h-9 rounded-lg hover:bg-slate-100 text-slate-500 flex items-center justify-center text-lg">
+        ✕
+      </button>
+    </header>
+
+    <div id="modal-body" class="overflow-auto p-6 space-y-6">
+      <div id="modal-loading" class="py-20 text-center text-slate-400">Loading…</div>
+      <div id="modal-error" class="hidden py-20 text-center text-red-600"></div>
+      <div id="modal-content" class="hidden space-y-6">
+        <div>
+          <div class="relative bg-slate-100 rounded-lg overflow-hidden aspect-[16/10]">
+            <img id="modal-hero" alt="" class="w-full h-full object-cover" />
+            <button type="button" id="modal-prev" aria-label="Previous image"
+                    class="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 text-white">‹</button>
+            <button type="button" id="modal-next" aria-label="Next image"
+                    class="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 text-white">›</button>
+            <div id="modal-image-counter" class="absolute bottom-2 right-3 text-xs text-white bg-black/60 rounded px-2 py-0.5"></div>
+          </div>
+          <div id="modal-thumbs" class="mt-3 flex gap-2 overflow-x-auto pb-1"></div>
+        </div>
+
+        <section id="modal-features-section" class="hidden">
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500 mb-2">Key features</h2>
+          <ul id="modal-features" class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-sm text-slate-800 list-disc pl-5"></ul>
+        </section>
+
+        <section id="modal-description-section" class="hidden">
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500 mb-2">Description</h2>
+          <div id="modal-description" class="prose prose-sm max-w-none text-slate-800"></div>
+        </section>
+
+        <section id="modal-floorplan-section" class="hidden">
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500 mb-2">Floorplan</h2>
+          <div id="modal-floorplans" class="space-y-3"></div>
+        </section>
+
+        <section id="modal-stations-section" class="hidden">
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500 mb-2">Nearest stations</h2>
+          <ul id="modal-stations" class="text-sm text-slate-800 space-y-1"></ul>
+        </section>
+
+        <div id="modal-agent" class="text-xs text-slate-500 pt-4 border-t"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<main class="max-w-6xl mx-auto px-6 py-8">
+  {% if not properties %}
+    <div class="text-center py-24 text-slate-400">
+      Nothing in <em>{{ bucket }}</em>.
+    </div>
+  {% else %}
+    <div id="grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+      {% for p in properties %}
+        <article class="card bg-white rounded-xl shadow-sm border border-slate-200 p-5 flex flex-col gap-3"
+                 tabindex="0"
+                 data-url="{{ p.full_url }}"
+                 id="card-{{ p.rightmove_id }}">
+          <div class="flex items-baseline justify-between">
+            <div class="text-2xl font-bold">£{{ '{:,}'.format(p.price) }}</div>
+            <div class="text-sm text-slate-500">{{ p.sqm }} m²</div>
+          </div>
+          <div class="text-sm">
+            <span class="inline-block px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium">
+              £{{ '{:,.0f}'.format(p.price_per_sqm) }}/m²
+            </span>
+          </div>
+          <address class="text-sm text-slate-700 flex-1">{{ p.address or '' }}</address>
+          <div class="flex gap-2 pt-2 border-t border-slate-100">
+            <button type="button" onclick="openModal({{ p.rightmove_id }})"
+                    class="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg text-center">
+              View →
+            </button>
+            {% if bucket == 'unreviewed' %}
+              <button hx-post="{{ url_for('set_status', rm_id=p.rightmove_id, new_status='rejected') }}"
+                      hx-target="#card-{{ p.rightmove_id }}" hx-swap="outerHTML swap:0.3s"
+                      class="reject-btn px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 text-sm font-medium rounded-lg">
+                Reject
+              </button>
+              <button hx-post="{{ url_for('set_status', rm_id=p.rightmove_id, new_status='shortlisted') }}"
+                      hx-target="#card-{{ p.rightmove_id }}" hx-swap="outerHTML swap:0.3s"
+                      class="shortlist-btn px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 text-sm font-medium rounded-lg">
+                Shortlist
+              </button>
+            {% else %}
+              <button hx-post="{{ url_for('set_status', rm_id=p.rightmove_id, new_status='unreviewed') }}"
+                      hx-target="#card-{{ p.rightmove_id }}" hx-swap="outerHTML swap:0.3s"
+                      class="undo-btn px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg">
+                Undo
+              </button>
+            {% endif %}
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  {% endif %}
+</main>
+
+<script>
+const BUCKET = {{ bucket | tojson }};
+
+// ---- Grid navigation ----
+const cards = () => Array.from(document.querySelectorAll('.card'));
+const focused = () => document.activeElement?.classList.contains('card') ? document.activeElement : null;
+function currentIndex() { const f = focused(); return f ? cards().indexOf(f) : -1; }
+function focusIndex(i) {
+  const c = cards();
+  if (!c.length) return;
+  const idx = Math.max(0, Math.min(c.length - 1, i));
+  c[idx].focus();
+  c[idx].scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+// ---- Modal ----
+const modal = document.getElementById('modal');
+let currentRmId = null;
+let currentImages = [];
+let currentImageIdx = 0;
+
+function modalOpen()  { modal.classList.remove('hidden'); modal.setAttribute('aria-hidden', 'false'); document.body.style.overflow = 'hidden'; }
+function closeModal() { modal.classList.add('hidden');    modal.setAttribute('aria-hidden', 'true');  document.body.style.overflow = ''; currentRmId = null; }
+function modalIsOpen() { return !modal.classList.contains('hidden'); }
+
+async function openModal(rmId) {
+  currentRmId = rmId;
+  document.getElementById('modal-loading').classList.remove('hidden');
+  document.getElementById('modal-error').classList.add('hidden');
+  document.getElementById('modal-content').classList.add('hidden');
+  modalOpen();
+
+  let data;
+  try {
+    const r = await fetch(`/preview/${rmId}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    data = await r.json();
+    if (data.error) throw new Error(data.error);
+  } catch (err) {
+    document.getElementById('modal-loading').classList.add('hidden');
+    const errEl = document.getElementById('modal-error');
+    errEl.textContent = `Failed to load preview: ${err.message}`;
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  // Header
+  document.getElementById('modal-price').textContent = data.price || '';
+  document.getElementById('modal-sqm').textContent = data.sqm ? `${data.sqm} m²` : '';
+  document.getElementById('modal-ppsqm').textContent = data.price_per_sqm ? `£${Math.round(data.price_per_sqm).toLocaleString()}/m²` : '';
+  const bedsParts = [];
+  if (data.bedrooms)    bedsParts.push(`${data.bedrooms} bed`);
+  if (data.bathrooms)   bedsParts.push(`${data.bathrooms} bath`);
+  if (data.property_type) bedsParts.push(data.property_type);
+  if (data.tenure)      bedsParts.push(data.tenure);
+  document.getElementById('modal-beds').textContent = bedsParts.join(' · ');
+  document.getElementById('modal-address').textContent = data.address || '';
+  document.getElementById('modal-open-rightmove').href = data.url;
+
+  // Buttons (bucket-dependent)
+  const rejectBtn = document.getElementById('modal-reject');
+  const shortBtn  = document.getElementById('modal-shortlist');
+  const undoBtn   = document.getElementById('modal-undo');
+  rejectBtn.classList.toggle('hidden', BUCKET !== 'unreviewed');
+  shortBtn .classList.toggle('hidden', BUCKET !== 'unreviewed');
+  undoBtn  .classList.toggle('hidden', BUCKET === 'unreviewed');
+
+  // Images
+  currentImages = (data.images || []).map(i => i.url).filter(Boolean);
+  currentImageIdx = 0;
+  renderHero();
+  const thumbs = document.getElementById('modal-thumbs');
+  thumbs.innerHTML = '';
+  currentImages.forEach((src, idx) => {
+    const img = document.createElement('img');
+    img.src = src;
+    img.alt = '';
+    img.loading = 'lazy';
+    img.className = 'h-16 w-24 object-cover rounded cursor-pointer flex-shrink-0 border-2 border-transparent hover:border-blue-400';
+    img.onclick = () => { currentImageIdx = idx; renderHero(); };
+    thumbs.appendChild(img);
+  });
+
+  // Features
+  const featSection = document.getElementById('modal-features-section');
+  const featUl = document.getElementById('modal-features');
+  featUl.innerHTML = '';
+  if (data.features && data.features.length) {
+    data.features.forEach(f => {
+      const li = document.createElement('li');
+      li.textContent = f;
+      featUl.appendChild(li);
+    });
+    featSection.classList.remove('hidden');
+  } else {
+    featSection.classList.add('hidden');
+  }
+
+  // Description (Rightmove gives sanitized HTML; set as innerHTML)
+  const descSection = document.getElementById('modal-description-section');
+  const descEl = document.getElementById('modal-description');
+  if (data.description) {
+    descEl.innerHTML = data.description;
+    descSection.classList.remove('hidden');
+  } else {
+    descSection.classList.add('hidden');
+  }
+
+  // Floorplans
+  const fpSection = document.getElementById('modal-floorplan-section');
+  const fpContainer = document.getElementById('modal-floorplans');
+  fpContainer.innerHTML = '';
+  if (data.floorplans && data.floorplans.length) {
+    data.floorplans.forEach(src => {
+      const img = document.createElement('img');
+      img.src = src;
+      img.alt = 'Floorplan';
+      img.className = 'max-w-full rounded border border-slate-200';
+      fpContainer.appendChild(img);
+    });
+    fpSection.classList.remove('hidden');
+  } else {
+    fpSection.classList.add('hidden');
+  }
+
+  // Stations
+  const stSection = document.getElementById('modal-stations-section');
+  const stUl = document.getElementById('modal-stations');
+  stUl.innerHTML = '';
+  if (data.stations && data.stations.length) {
+    data.stations.forEach(s => {
+      const li = document.createElement('li');
+      const dist = s.distance != null ? ` — ${s.distance.toFixed(2)} ${s.unit || 'miles'}` : '';
+      li.textContent = `${s.name}${dist}`;
+      stUl.appendChild(li);
+    });
+    stSection.classList.remove('hidden');
+  } else {
+    stSection.classList.add('hidden');
+  }
+
+  // Agent
+  document.getElementById('modal-agent').textContent = data.agent ? `Marketed by ${data.agent}` : '';
+
+  document.getElementById('modal-loading').classList.add('hidden');
+  document.getElementById('modal-content').classList.remove('hidden');
+}
+
+function renderHero() {
+  const hero = document.getElementById('modal-hero');
+  const counter = document.getElementById('modal-image-counter');
+  if (!currentImages.length) {
+    hero.src = '';
+    hero.alt = 'No images';
+    counter.textContent = '';
+    return;
+  }
+  hero.src = currentImages[currentImageIdx];
+  counter.textContent = `${currentImageIdx + 1} / ${currentImages.length}`;
+}
+document.getElementById('modal-prev').onclick = () => {
+  if (!currentImages.length) return;
+  currentImageIdx = (currentImageIdx - 1 + currentImages.length) % currentImages.length;
+  renderHero();
+};
+document.getElementById('modal-next').onclick = () => {
+  if (!currentImages.length) return;
+  currentImageIdx = (currentImageIdx + 1) % currentImages.length;
+  renderHero();
+};
+
+async function modalSetStatus(status) {
+  if (!currentRmId) return;
+  const id = currentRmId;
+  try {
+    await fetch(`/set-status/${id}/${status}`, { method: 'POST' });
+  } catch (e) { /* ignore */ }
+  document.getElementById(`card-${id}`)?.remove();
+  closeModal();
+  updateHeaderCountsFallback();
+}
+
+document.getElementById('modal-reject')   .onclick = () => modalSetStatus('rejected');
+document.getElementById('modal-shortlist').onclick = () => modalSetStatus('shortlisted');
+document.getElementById('modal-undo')     .onclick = () => modalSetStatus('unreviewed');
+
+// Update header counts optimistically after a card leaves the current bucket
+function updateHeaderCountsFallback() {
+  const remaining = document.querySelectorAll('.card').length;
+  // Find the active bucket chip and update its count span
+  document.querySelectorAll('header nav a').forEach(a => {
+    if (a.href.endsWith('/' + BUCKET)) {
+      const span = a.querySelector('span');
+      if (span) span.textContent = remaining;
+    }
+  });
+}
+
+// ---- Keyboard ----
+document.addEventListener('keydown', (e) => {
+  if (e.target.matches('input, textarea, select')) return;
+  const key = e.key.toLowerCase();
+
+  if (modalIsOpen()) {
+    if (e.key === 'Escape')       { e.preventDefault(); closeModal(); }
+    else if (e.key === 'ArrowLeft')  { e.preventDefault(); document.getElementById('modal-prev').click(); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); document.getElementById('modal-next').click(); }
+    else if (key === 'r' && BUCKET === 'unreviewed')  { e.preventDefault(); modalSetStatus('rejected'); }
+    else if (key === 's' && BUCKET === 'unreviewed')  { e.preventDefault(); modalSetStatus('shortlisted'); }
+    else if (key === 'u' && BUCKET !== 'unreviewed')  { e.preventDefault(); modalSetStatus('unreviewed'); }
+    return;
+  }
+
+  if (key === 'j')      { e.preventDefault(); focusIndex(currentIndex() === -1 ? 0 : currentIndex() + 1); }
+  else if (key === 'k') { e.preventDefault(); focusIndex(currentIndex() === -1 ? 0 : currentIndex() - 1); }
+  else if (key === 'o' || key === 'enter') {
+    const f = focused();
+    if (f) { e.preventDefault(); openModal(parseInt(f.id.replace('card-', ''), 10)); }
+  }
+  else if (key === 'r') { const f = focused(); if (f) { e.preventDefault(); f.querySelector('.reject-btn')?.click(); } }
+  else if (key === 's') { const f = focused(); if (f) { e.preventDefault(); f.querySelector('.shortlist-btn')?.click(); } }
+  else if (key === 'u') { const f = focused(); if (f) { e.preventDefault(); f.querySelector('.undo-btn')?.click(); } }
+});
+
+// Advance focus after HTMX removes a card
+document.addEventListener('htmx:afterSwap', () => {
+  const c = cards();
+  if (c.length) c[0].focus();
+});
+
+// Autofocus first card on load
+window.addEventListener('DOMContentLoaded', () => {
+  const c = cards();
+  if (c.length) c[0].focus();
+});
+</script>
+
+</body>
+</html>

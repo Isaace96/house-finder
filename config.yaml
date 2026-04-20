@@ -1,0 +1,8 @@
+query_url: https://www.rightmove.co.uk/property-for-sale/find.html?minBedrooms=3&propertyTypes=detached%2Csemi-detached%2Cterraced&sortType=2&minPrice=450000&viewType=LIST&channel=BUY&index=0&maxPrice=550000&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22eqbzH%7DbbB%7Cf%40%7Cx%40%7CfA%60%7B%40%7EN%3F%7Eb%40e_%40tYal%40hp%40w%7DC%7E%5Ek_A%7Ez%40%60l%40%7Ez%40bAtQqGjdAyv%40t%7D%40%7BrB%7EJse%40sI_dCwi%40ewBsE%7Dx%40jl%40sdFhP%7Bi%40%60k%40%7B%60IkX%7Dx%40uU%7BK_c%40d_%40kLha%40_Wv_CuAbjAtAmEui%40jfDuI%7DgAtIujDkl%40ihC_w%40yv%40_SiCu%5DdAid%40zi%40siC%60pJ%7EFj_AiLbqD%7CF%7Ci%40hdAdfCiHxcB%7DbA%60uBkTzx%40%7DnArnBiHvXtI%60%7B%40_Gvg%40%7EBqG%22%7D
+search_type: Sale           # Sale or Rental
+max_pages: 11              # 1 page = 25 listings (max 42 per Rightmove)
+sqm_min: 70                 # floor-area lower bound (m²)
+sqm_max: 180            # floor-area upper bound (m²)
+db_path: db_fran_all_2026-04-20.json
+open_webbrowser: true
+top_n_tabs: 10              # when open_webbrowser is true, open top-N by £/m²

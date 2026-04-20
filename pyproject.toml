@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "house-finder"
+version = "0.1.0"
+description = ""
+authors = ["Your Name <you@example.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+beautifulsoup4 = "^4.12.3"
+requests = "^2.31.0"
+pydantic = "^2.10.0"
+pillow = "^11.0.0"
+pytesseract = "^0.3.13"
+tinydb = "^4.8.0"
+pytest = "^8.0.1"
+loguru = "^0.7.2"
+pyperclip = "^1.9.0"
+pyyaml = "^6.0"
+flask = "^3.0"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
