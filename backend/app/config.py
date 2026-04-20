@@ -5,7 +5,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str
-    supabase_jwt_secret: str
+    supabase_jwt_secret: str = ""
+    supabase_url: str = ""
     frontend_url: str = "http://localhost:5173"
     rightmove_user_agent: str = (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) "
