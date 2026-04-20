@@ -20,6 +20,7 @@ frontend/.env.local
 # Node / frontend
 frontend/node_modules/
 frontend/dist/
+frontend/tsconfig.tsbuildinfo
 
 # Editor / OS
 .DS_Store
