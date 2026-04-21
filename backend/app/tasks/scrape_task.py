@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import gc
 import os
 from uuid import UUID
 
@@ -20,7 +21,7 @@ from app.services.scraper import (
 _user_locks: dict[UUID, asyncio.Lock] = {}
 
 KEEP_ALIVE_INTERVAL_SECONDS = 8 * 60
-DETAIL_FETCH_CONCURRENCY = 6
+DETAIL_FETCH_CONCURRENCY = int(os.environ.get("SCRAPE_CONCURRENCY", "3"))
 
 
 async def _keep_alive_ping(search_id: int) -> None:
@@ -225,6 +226,12 @@ async def run_scrape(search_id: int, user_id: UUID) -> None:
                         total_found += 1
 
                     await session.commit()
+
+                results = None
+                page_items = None
+                new_items = None
+                prop_id_by_rm = None
+                gc.collect()
 
                 progress = min(99, int(((page_index + 1) / max_pages) * 100))
                 await _set_progress(search_id, progress)

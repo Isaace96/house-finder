@@ -108,25 +108,39 @@ def find_image_srcs(url: str) -> list[str]:
     response = requests.get(url, headers=_headers, timeout=30)
     links: list[str] = []
 
-    if response.status_code == 200:
-        soup = BeautifulSoup(response.content, "html.parser")
-        floorplan_imgs = find_floor_plans(soup)
-        for floorplan_img in floorplan_imgs:
-            src = floorplan_img.get("src")
-            if src:
-                logger.debug(f"Found floorplan img src={src}")
-                links.append(src)
-    else:
-        logger.info(f"Failed to retrieve floorplan page. Status: {response.status_code}")
+    try:
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, "html.parser")
+            try:
+                floorplan_imgs = find_floor_plans(soup)
+                for floorplan_img in floorplan_imgs:
+                    src = floorplan_img.get("src")
+                    if src:
+                        logger.debug(f"Found floorplan img src={src}")
+                        links.append(src)
+            finally:
+                soup.decompose()
+        else:
+            logger.info(
+                f"Failed to retrieve floorplan page. Status: {response.status_code}"
+            )
+    finally:
+        response.close()
     return list(dict.fromkeys(links))
 
 
 def load_image(image_url: str) -> Optional[Image.Image]:
     response = requests.get(image_url, headers=_headers, timeout=30)
-    if response.status_code == 200:
-        return Image.open(BytesIO(response.content))
-    logger.info(f"Failed to retrieve image. Status: {response.status_code}")
-    return None
+    try:
+        if response.status_code == 200:
+            buf = BytesIO(response.content)
+            image = Image.open(buf)
+            image.load()
+            return image
+        logger.info(f"Failed to retrieve image. Status: {response.status_code}")
+        return None
+    finally:
+        response.close()
 
 
 def format_property_link_to_floorplan(link: str) -> str:
@@ -152,7 +166,10 @@ def get_sqm_from_property_link(link: str) -> Optional[float]:
         image = load_image(image_src)
         if image is None:
             return None
-        sqm = get_sqm_from_image(image)
+        try:
+            sqm = get_sqm_from_image(image)
+        finally:
+            image.close()
         if sqm is not None:
             return sqm
     return None

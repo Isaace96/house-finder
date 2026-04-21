@@ -109,19 +109,21 @@ def _get_address_from_soup(soup: BeautifulSoup) -> Optional[str]:
 
 
 def _extract_page_model(html_text: str) -> Optional[dict[str, Any]]:
-    soup = BeautifulSoup(html_text, "html.parser")
-    for script in soup.find_all("script"):
-        txt = script.string
-        if not txt or "window.PAGE_MODEL" not in txt:
-            continue
-        start = txt.index("window.PAGE_MODEL")
-        eq = txt.index("=", start) + 1
-        try:
-            obj, _ = json.JSONDecoder().raw_decode(txt[eq:].lstrip())
-            return obj
-        except json.JSONDecodeError:
-            return None
-    return None
+    idx = html_text.find("window.PAGE_MODEL")
+    if idx == -1:
+        return None
+    eq = html_text.find("=", idx)
+    if eq == -1:
+        return None
+    start = eq + 1
+    n = len(html_text)
+    while start < n and html_text[start] in " \t\r\n":
+        start += 1
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(html_text, start)
+        return obj
+    except json.JSONDecodeError:
+        return None
 
 
 def _sqm_from_page_model(page_model: dict[str, Any]) -> Optional[float]:
@@ -169,26 +171,35 @@ def extract_data_from_properties_link(
     res = _get_with_retries(f"{BASE_URL}{property_link}")
     if res.status_code != 200:
         logger.warning(f"Property page {property_link} status {res.status_code}")
+        res.close()
         return None
 
-    page_model = _extract_page_model(res.text)
+    html_text = res.text
+    res.close()
+
+    page_model = _extract_page_model(html_text)
     sqm: Optional[float] = None
     price: Optional[int] = None
     address: Optional[str] = None
 
-    if page_model:
+    if page_model is not None:
         sqm = _sqm_from_page_model(page_model)
         price = _price_from_page_model(page_model)
         address = _address_from_page_model(page_model)
+        del page_model
 
     if sqm is None or price is None or address is None:
-        soup = BeautifulSoup(res.content, "html.parser")
+        soup = BeautifulSoup(html_text, "html.parser")
         if sqm is None:
             sqm = _get_area_from_info_reel(soup)
         if price is None:
             price = _get_price_from_soup(soup)
         if address is None:
             address = _get_address_from_soup(soup)
+        soup.decompose()
+        del soup
+
+    del html_text
 
     if not sqm:
         try:
