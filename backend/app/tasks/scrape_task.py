@@ -1,6 +1,9 @@
 import asyncio
+import contextlib
+import os
 from uuid import UUID
 
+import requests
 from loguru import logger
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -15,6 +18,22 @@ from app.services.scraper import (
 )
 
 _user_locks: dict[UUID, asyncio.Lock] = {}
+
+KEEP_ALIVE_INTERVAL_SECONDS = 8 * 60
+
+
+async def _keep_alive_ping(search_id: int) -> None:
+    external_url = os.environ.get("RENDER_EXTERNAL_URL")
+    if not external_url:
+        return
+    ping_url = f"{external_url.rstrip('/')}/api/health"
+    while True:
+        await asyncio.sleep(KEEP_ALIVE_INTERVAL_SECONDS)
+        try:
+            await asyncio.to_thread(requests.get, ping_url, timeout=10)
+            logger.debug(f"Search {search_id}: keep-alive ping ok")
+        except Exception as e:
+            logger.warning(f"Search {search_id}: keep-alive ping failed: {e}")
 
 
 def _lock_for(user_id: UUID) -> asyncio.Lock:
@@ -95,6 +114,7 @@ async def run_scrape(search_id: int, user_id: UUID) -> None:
             search.progress = 1
             await session.commit()
 
+        ping_task = asyncio.create_task(_keep_alive_ping(search_id))
         try:
             total_found = 0
             total_failed = 0
@@ -179,3 +199,7 @@ async def run_scrape(search_id: int, user_id: UUID) -> None:
                     .values(status="failed", error_message=str(e)[:500])
                 )
                 await session.commit()
+        finally:
+            ping_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await ping_task
