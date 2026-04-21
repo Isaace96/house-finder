@@ -20,6 +20,7 @@ from app.services.scraper import (
 _user_locks: dict[UUID, asyncio.Lock] = {}
 
 KEEP_ALIVE_INTERVAL_SECONDS = 8 * 60
+DETAIL_FETCH_CONCURRENCY = 6
 
 
 async def _keep_alive_ping(search_id: int) -> None:
@@ -115,6 +116,14 @@ async def run_scrape(search_id: int, user_id: UUID) -> None:
             await session.commit()
 
         ping_task = asyncio.create_task(_keep_alive_ping(search_id))
+        semaphore = asyncio.Semaphore(DETAIL_FETCH_CONCURRENCY)
+
+        async def fetch_detail(link: str):
+            async with semaphore:
+                return await asyncio.to_thread(
+                    extract_data_from_properties_link, link, search_type
+                )
+
         try:
             total_found = 0
             total_failed = 0
@@ -135,45 +144,87 @@ async def run_scrape(search_id: int, user_id: UUID) -> None:
                 if not links:
                     break
 
+                page_items: list[tuple[str, int]] = []
                 for link in links:
                     if link in seen_links:
                         continue
                     seen_links.add(link)
-
                     rm_id = rightmove_id_from_link(link)
                     if rm_id is None:
                         continue
+                    page_items.append((link, rm_id))
 
-                    try:
-                        async with SessionLocal() as session:
-                            existing = await session.execute(
-                                select(Property).where(Property.rightmove_id == rm_id)
+                if not page_items:
+                    progress = min(99, int(((page_index + 1) / max_pages) * 100))
+                    await _set_progress(search_id, progress)
+                    continue
+
+                async with SessionLocal() as session:
+                    existing_result = await session.execute(
+                        select(Property.rightmove_id, Property.id).where(
+                            Property.rightmove_id.in_([rm for _, rm in page_items])
+                        )
+                    )
+                    prop_id_by_rm: dict[int, int] = {
+                        row.rightmove_id: row.id for row in existing_result
+                    }
+
+                new_items = [
+                    (link, rm_id)
+                    for link, rm_id in page_items
+                    if rm_id not in prop_id_by_rm
+                ]
+
+                if new_items:
+                    results = await asyncio.gather(
+                        *(fetch_detail(link) for link, _ in new_items),
+                        return_exceptions=True,
+                    )
+                else:
+                    results = []
+
+                async with SessionLocal() as session:
+                    for (link, rm_id), detail in zip(new_items, results):
+                        if isinstance(detail, Exception):
+                            logger.warning(
+                                f"Search {search_id}: listing {link} failed: {detail}"
                             )
-                            prop = existing.scalar_one_or_none()
+                            total_failed += 1
+                            continue
+                        if detail is None:
+                            total_failed += 1
+                            continue
+                        try:
+                            async with session.begin_nested():
+                                prop_id = await _upsert_property(session, detail)
+                        except Exception as e:
+                            logger.warning(
+                                f"Search {search_id}: upsert {link} failed: {e}"
+                            )
+                            total_failed += 1
+                            continue
+                        if prop_id is not None:
+                            prop_id_by_rm[rm_id] = prop_id
 
-                            if prop is None:
-                                details = await asyncio.to_thread(
-                                    extract_data_from_properties_link, link, search_type
-                                )
-                                if details is None:
-                                    total_failed += 1
-                                    continue
-                                prop_id = await _upsert_property(session, details)
-                            else:
-                                prop_id = prop.id
-
-                            if prop_id is not None:
+                    for _, rm_id in page_items:
+                        prop_id = prop_id_by_rm.get(rm_id)
+                        if prop_id is None:
+                            continue
+                        try:
+                            async with session.begin_nested():
                                 await session.execute(
                                     pg_insert(SearchProperty)
                                     .values(search_id=search_id, property_id=prop_id)
                                     .on_conflict_do_nothing()
                                 )
-                                total_found += 1
-                            await session.commit()
-                    except Exception as e:
-                        logger.warning(f"Search {search_id}: listing {link} failed: {e}")
-                        total_failed += 1
-                        continue
+                        except Exception as e:
+                            logger.warning(
+                                f"Search {search_id}: link prop {prop_id} failed: {e}"
+                            )
+                            continue
+                        total_found += 1
+
+                    await session.commit()
 
                 progress = min(99, int(((page_index + 1) / max_pages) * 100))
                 await _set_progress(search_id, progress)

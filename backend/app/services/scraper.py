@@ -1,7 +1,8 @@
+import json
 import re
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 import requests
 from bs4 import BeautifulSoup
@@ -9,6 +10,8 @@ from loguru import logger
 
 from app.config import settings
 from app.services.image_extractor import get_sqm_from_property_link
+
+SQFT_TO_SQM = 0.092903
 
 BASE_URL = "https://www.rightmove.co.uk"
 PROPERTIES_PER_PAGE = 25
@@ -105,6 +108,52 @@ def _get_address_from_soup(soup: BeautifulSoup) -> Optional[str]:
     return address.get_text() if address else None
 
 
+def _extract_page_model(html_text: str) -> Optional[dict[str, Any]]:
+    soup = BeautifulSoup(html_text, "html.parser")
+    for script in soup.find_all("script"):
+        txt = script.string
+        if not txt or "window.PAGE_MODEL" not in txt:
+            continue
+        start = txt.index("window.PAGE_MODEL")
+        eq = txt.index("=", start) + 1
+        try:
+            obj, _ = json.JSONDecoder().raw_decode(txt[eq:].lstrip())
+            return obj
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
+def _sqm_from_page_model(page_model: dict[str, Any]) -> Optional[float]:
+    pd = page_model.get("propertyData") or {}
+    sizings = pd.get("sizings") or []
+    for s in sizings:
+        if s.get("unit") == "sqm":
+            val = s.get("minimumSize") or s.get("maximumSize")
+            if val:
+                return float(val)
+    for s in sizings:
+        if s.get("unit") == "sqft":
+            val = s.get("minimumSize") or s.get("maximumSize")
+            if val:
+                return float(val) * SQFT_TO_SQM
+    return None
+
+
+def _price_from_page_model(page_model: dict[str, Any]) -> Optional[int]:
+    pd = page_model.get("propertyData") or {}
+    prices = pd.get("prices") or {}
+    display = prices.get("primaryPrice") or ""
+    digits = "".join(c for c in display if c.isdigit())
+    return int(digits) if digits else None
+
+
+def _address_from_page_model(page_model: dict[str, Any]) -> Optional[str]:
+    pd = page_model.get("propertyData") or {}
+    addr = pd.get("address") or {}
+    return addr.get("displayAddress")
+
+
 def fetch_property_links_for_page(query_url: str, offset: int) -> list[str]:
     url = format_search_url(query_url, offset)
     response = _get_with_retries(url)
@@ -122,10 +171,24 @@ def extract_data_from_properties_link(
         logger.warning(f"Property page {property_link} status {res.status_code}")
         return None
 
-    soup = BeautifulSoup(res.content, "html.parser")
-    sqm = _get_area_from_info_reel(soup)
-    price = _get_price_from_soup(soup)
-    address = _get_address_from_soup(soup)
+    page_model = _extract_page_model(res.text)
+    sqm: Optional[float] = None
+    price: Optional[int] = None
+    address: Optional[str] = None
+
+    if page_model:
+        sqm = _sqm_from_page_model(page_model)
+        price = _price_from_page_model(page_model)
+        address = _address_from_page_model(page_model)
+
+    if sqm is None or price is None or address is None:
+        soup = BeautifulSoup(res.content, "html.parser")
+        if sqm is None:
+            sqm = _get_area_from_info_reel(soup)
+        if price is None:
+            price = _get_price_from_soup(soup)
+        if address is None:
+            address = _get_address_from_soup(soup)
 
     if not sqm:
         try:
