@@ -29,6 +29,7 @@ class SearchOut(BaseModel):
     progress: int
     error_message: str | None
     total_found: int
+    total_failed: int
     created_at: datetime
     updated_at: datetime
 

@@ -97,13 +97,21 @@ async def run_scrape(search_id: int, user_id: UUID) -> None:
 
         try:
             total_found = 0
+            total_failed = 0
             seen_links: set[str] = set()
             for page_index in range(max_pages):
                 logger.info(f"Search {search_id}: page {page_index + 1}/{max_pages}")
                 offset = page_index * PROPERTIES_PER_PAGE
-                links = await asyncio.to_thread(
-                    fetch_property_links_for_page, query_url, offset
-                )
+                try:
+                    links = await asyncio.to_thread(
+                        fetch_property_links_for_page, query_url, offset
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Search {search_id}: listing page {page_index + 1} failed after retries: {e}"
+                    )
+                    total_failed += 1
+                    continue
                 if not links:
                     break
 
@@ -116,30 +124,36 @@ async def run_scrape(search_id: int, user_id: UUID) -> None:
                     if rm_id is None:
                         continue
 
-                    async with SessionLocal() as session:
-                        existing = await session.execute(
-                            select(Property).where(Property.rightmove_id == rm_id)
-                        )
-                        prop = existing.scalar_one_or_none()
-
-                        if prop is None:
-                            details = await asyncio.to_thread(
-                                extract_data_from_properties_link, link, search_type
+                    try:
+                        async with SessionLocal() as session:
+                            existing = await session.execute(
+                                select(Property).where(Property.rightmove_id == rm_id)
                             )
-                            if details is None:
-                                continue
-                            prop_id = await _upsert_property(session, details)
-                        else:
-                            prop_id = prop.id
+                            prop = existing.scalar_one_or_none()
 
-                        if prop_id is not None:
-                            await session.execute(
-                                pg_insert(SearchProperty)
-                                .values(search_id=search_id, property_id=prop_id)
-                                .on_conflict_do_nothing()
-                            )
-                            total_found += 1
-                        await session.commit()
+                            if prop is None:
+                                details = await asyncio.to_thread(
+                                    extract_data_from_properties_link, link, search_type
+                                )
+                                if details is None:
+                                    total_failed += 1
+                                    continue
+                                prop_id = await _upsert_property(session, details)
+                            else:
+                                prop_id = prop.id
+
+                            if prop_id is not None:
+                                await session.execute(
+                                    pg_insert(SearchProperty)
+                                    .values(search_id=search_id, property_id=prop_id)
+                                    .on_conflict_do_nothing()
+                                )
+                                total_found += 1
+                            await session.commit()
+                    except Exception as e:
+                        logger.warning(f"Search {search_id}: listing {link} failed: {e}")
+                        total_failed += 1
+                        continue
 
                 progress = min(99, int(((page_index + 1) / max_pages) * 100))
                 await _set_progress(search_id, progress)
@@ -148,7 +162,12 @@ async def run_scrape(search_id: int, user_id: UUID) -> None:
                 await session.execute(
                     update(Search)
                     .where(Search.id == search_id)
-                    .values(status="complete", progress=100, total_found=total_found)
+                    .values(
+                        status="complete",
+                        progress=100,
+                        total_found=total_found,
+                        total_failed=total_failed,
+                    )
                 )
                 await session.commit()
         except Exception as e:

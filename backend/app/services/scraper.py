@@ -1,4 +1,5 @@
 import re
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -12,8 +13,34 @@ from app.services.image_extractor import get_sqm_from_property_link
 BASE_URL = "https://www.rightmove.co.uk"
 PROPERTIES_PER_PAGE = 25
 STARTING_INDEX = 0
+RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
+MAX_RETRIES = 3
 
 _headers = {"User-Agent": settings.rightmove_user_agent}
+
+
+def _get_with_retries(url: str) -> requests.Response:
+    last_exc: Exception | None = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = requests.get(url, headers=_headers, timeout=30)
+            if response.status_code in RETRY_STATUS_CODES:
+                logger.warning(
+                    f"{url} returned {response.status_code} (attempt {attempt + 1}/{MAX_RETRIES})"
+                )
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(2**attempt)
+                    continue
+            return response
+        except (requests.Timeout, requests.ConnectionError) as e:
+            last_exc = e
+            logger.warning(
+                f"{url} {type(e).__name__} (attempt {attempt + 1}/{MAX_RETRIES}): {e}"
+            )
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(2**attempt)
+    assert last_exc is not None
+    raise last_exc
 
 
 @dataclass
@@ -80,7 +107,7 @@ def _get_address_from_soup(soup: BeautifulSoup) -> Optional[str]:
 
 def fetch_property_links_for_page(query_url: str, offset: int) -> list[str]:
     url = format_search_url(query_url, offset)
-    response = requests.get(url, headers=_headers, timeout=30)
+    response = _get_with_retries(url)
     if response.status_code != 200:
         logger.info(f"Listing page failed. Status: {response.status_code}")
         return []
@@ -90,7 +117,7 @@ def fetch_property_links_for_page(query_url: str, offset: int) -> list[str]:
 def extract_data_from_properties_link(
     property_link: str, search_type: str
 ) -> Optional[PropertyDetails]:
-    res = requests.get(f"{BASE_URL}{property_link}", headers=_headers, timeout=30)
+    res = _get_with_retries(f"{BASE_URL}{property_link}")
     if res.status_code != 200:
         logger.warning(f"Property page {property_link} status {res.status_code}")
         return None

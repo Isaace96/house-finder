@@ -75,3 +75,27 @@ async def delete_search(
         raise HTTPException(status_code=404, detail="Search not found")
     await session.execute(delete(Search).where(Search.id == search_id))
     await session.commit()
+
+
+@router.post("/{search_id}/rerun", response_model=SearchOut)
+async def rerun_search(
+    search_id: int,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_session),
+):
+    search = await session.get(Search, search_id)
+    if not search or search.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Search not found")
+    if search.status in ("pending", "scraping"):
+        raise HTTPException(status_code=409, detail="Search is already running")
+
+    search.status = "pending"
+    search.progress = 0
+    search.error_message = None
+    search.total_found = 0
+    search.total_failed = 0
+    await session.commit()
+    await session.refresh(search)
+
+    asyncio.create_task(run_scrape(search.id, user_id))
+    return search

@@ -15,6 +15,11 @@ export function SearchCard({ search }: { search: Search }) {
     mutationFn: () => api.deleteSearch(search.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["searches"] }),
   });
+  const rerun = useMutation({
+    mutationFn: () => api.rerunSearch(search.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["searches"] }),
+  });
+  const canRerun = search.status === "complete" || search.status === "failed";
 
   return (
     <article className="bg-white rounded-xl border border-slate-200 p-5 flex flex-col gap-3">
@@ -36,6 +41,9 @@ export function SearchCard({ search }: { search: Search }) {
         <span>{search.sqm_min}–{search.sqm_max} m²</span>
         <span>{search.max_pages} pages</span>
         <span>{search.total_found} found</span>
+        {search.total_failed > 0 && (
+          <span className="text-amber-600">{search.total_failed} skipped</span>
+        )}
       </div>
       {(search.status === "scraping" || search.status === "pending") && (
         <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
@@ -52,6 +60,14 @@ export function SearchCard({ search }: { search: Search }) {
         >
           Review →
         </Link>
+        <button
+          onClick={() => rerun.mutate()}
+          disabled={!canRerun || rerun.isPending}
+          className="px-3 py-2 bg-slate-100 hover:bg-blue-100 hover:text-blue-700 text-sm rounded disabled:opacity-50 disabled:cursor-not-allowed"
+          title={canRerun ? "Rerun scrape to pick up new listings" : "Already running"}
+        >
+          {rerun.isPending ? "Rerunning…" : "Rerun"}
+        </button>
         <button
           onClick={() => {
             if (confirm("Delete this search?")) del.mutate();

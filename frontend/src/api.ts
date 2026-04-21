@@ -38,6 +38,7 @@ export type Search = {
   progress: number;
   error_message: string | null;
   total_found: number;
+  total_failed: number;
   created_at: string;
   updated_at: string;
 };
@@ -93,6 +94,8 @@ export const api = {
   }) => apiFetch<Search>("/api/searches", { method: "POST", body: JSON.stringify(body) }),
   getSearch: (id: number) => apiFetch<Search>(`/api/searches/${id}`),
   deleteSearch: (id: number) => apiFetch<void>(`/api/searches/${id}`, { method: "DELETE" }),
+  rerunSearch: (id: number) =>
+    apiFetch<Search>(`/api/searches/${id}/rerun`, { method: "POST" }),
   listProperties: (searchId: number, status?: string) => {
     const qs = new URLSearchParams();
     if (status) qs.set("status", status);

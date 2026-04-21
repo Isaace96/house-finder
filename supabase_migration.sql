@@ -27,9 +27,12 @@ CREATE TABLE IF NOT EXISTS searches (
     progress        INTEGER NOT NULL DEFAULT 0,
     error_message   TEXT,
     total_found     INTEGER DEFAULT 0,
+    total_failed    INTEGER DEFAULT 0,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE searches ADD COLUMN IF NOT EXISTS total_failed INTEGER DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS searches_user_id_idx ON searches(user_id);
 
